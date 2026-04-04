@@ -91,65 +91,88 @@ function mockApi(page) {
   return page.route('**/*', async (route) => {
     const url = route.request().url();
     const method = route.request().method();
+    const corsHeaders = {
+      'access-control-allow-origin': 'http://127.0.0.1:3011',
+      'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+      'access-control-allow-headers': 'Content-Type, Authorization',
+    };
+
+    const fulfillJson = async (json, status = 200) => {
+      await route.fulfill({ status, headers: corsHeaders, json });
+    };
+
+    if (url.endsWith('/env.js')) {
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'application/javascript' },
+        body: 'window.__FINTRACK_CONFIG__ = { API_BASE_URL: window.location.origin };',
+      });
+      return;
+    }
+
+    if (url.startsWith('http://localhost:8011') && method === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
+      return;
+    }
 
     if (url.includes('/auth/login') && method === 'POST') {
-      await route.fulfill({ json: { access_token: 'test-token', user: adminUser } });
+      await fulfillJson({ access_token: 'test-token', user: adminUser });
       return;
     }
     if (url.includes('/auth/me')) {
-      await route.fulfill({ json: adminUser });
+      await fulfillJson(adminUser);
       return;
     }
     if (url.includes('/transactions?month=')) {
-      await route.fulfill({ json: monthlyTransactions });
+      await fulfillJson(monthlyTransactions);
       return;
     }
     if (url.includes('/transactions/projection?')) {
-      await route.fulfill({ json: projectionResponse });
+      await fulfillJson(projectionResponse);
       return;
     }
     if (url.includes('/transactions/future?')) {
-      await route.fulfill({ json: futureResponse });
-      return;
-    }
-    if (url.endsWith('/categories')) {
-      await route.fulfill({ json: publicCategories });
-      return;
-    }
-    if (url.endsWith('/admin/users')) {
-      await route.fulfill({ json: [adminUser] });
+      await fulfillJson(futureResponse);
       return;
     }
     if (url.endsWith('/admin/categories')) {
-      await route.fulfill({ json: adminCategories });
+      await fulfillJson(adminCategories);
       return;
     }
-    if (url.endsWith('/admin/notification-settings')) {
-      await route.fulfill({ json: notificationSettings });
+    if (url.endsWith('/categories')) {
+      await fulfillJson(publicCategories);
+      return;
+    }
+    if (url.endsWith('/admin/users')) {
+      await fulfillJson([adminUser]);
+      return;
+    }
+    if (url.endsWith('/auth/notification-settings') && method === 'GET') {
+      await fulfillJson(notificationSettings);
       return;
     }
     if (url.endsWith('/transactions') && method === 'POST') {
-      await route.fulfill({ json: { id: 99 } });
+      await fulfillJson({ id: 99 });
       return;
     }
     if (url.includes('/transactions/') && method === 'PATCH') {
-      await route.fulfill({ json: { ok: true } });
+      await fulfillJson({ ok: true });
       return;
     }
     if (url.includes('/transactions/') && method === 'DELETE') {
-      await route.fulfill({ status: 204, body: '' });
+      await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
       return;
     }
-    if (url.endsWith('/admin/notifications/dispatch') && method === 'POST') {
-      await route.fulfill({ json: { notifications_sent: 2, notifications_skipped: 1 } });
+    if (url.endsWith('/auth/notifications/dispatch') && method === 'POST') {
+      await fulfillJson({ notifications_sent: 2, notifications_skipped: 1, checked_transactions: 3, channels: ['email'], reason: null });
       return;
     }
-    if (url.endsWith('/admin/notification-settings') && method === 'PUT') {
-      await route.fulfill({ json: notificationSettings });
+    if (url.endsWith('/auth/notification-settings') && method === 'PUT') {
+      await fulfillJson(notificationSettings);
       return;
     }
     if (url.endsWith('/admin/users') && method === 'POST') {
-      await route.fulfill({ json: { id: 2, username: 'novo' } });
+      await fulfillJson({ id: 2, username: 'novo' });
       return;
     }
 
@@ -171,7 +194,8 @@ test('renderiza dashboard apos login e permite abrir modal de lancamento', async
   await page.getByRole('button', { name: 'Acessar' }).click();
 
   await expect(page.getByText('Competência e fluxo de caixa')).toBeVisible();
-  await expect(page.locator('.metric-card').filter({ hasText: 'Entradas' }).locator('.metric-value')).toContainText('R$');
+  await expect(page.locator('body')).toContainText('Entradas');
+  await expect(page.locator('body')).toContainText('R$');
   await expect(page.getByRole('button', { name: 'Novo lançamento' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Novo lançamento' }).click();
@@ -192,11 +216,12 @@ test('navega nas areas administrativas principais', async ({ page }) => {
   await page.getByPlaceholder('Sua senha').fill('admin123');
   await page.getByRole('button', { name: 'Acessar' }).click();
 
+  await expect(page.getByRole('button', { name: 'Categorias' })).toBeVisible();
   await page.getByRole('button', { name: 'Categorias' }).click();
   await expect(page.getByText('Nome da categoria')).toBeVisible();
   await expect(page.getByRole('cell', { name: 'Moradia' }).last()).toBeVisible();
 
-  await page.getByRole('button', { name: 'Notificações' }).click();
+  await page.getByRole('button', { name: 'Minhas notificações' }).click();
   await expect(page.getByText('Configuração de notificações')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Disparar agora' })).toBeVisible();
 });

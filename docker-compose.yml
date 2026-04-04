@@ -1,0 +1,20 @@
+services:
+  web:
+    build:
+      context: .
+    environment:
+      API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://host.docker.internal:8011}
+    ports:
+      - "${FRONTEND_PORT:-3011}:80"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --spider
+        - http://127.0.0.1/index.html
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

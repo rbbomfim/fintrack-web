@@ -36,3 +36,22 @@ npm run dev
 ```
 
 Por padrão, o arquivo `public/env.js` aponta para `http://localhost:8011`. Em contêiner, o `docker-entrypoint.sh` sobrescreve esse arquivo com os valores de ambiente.
+
+## Deploy isolado no Portainer
+
+Este diretório agora possui um `docker-compose.yml` próprio para subir apenas o frontend.
+
+Pontos importantes:
+
+- o compose não usa `env_file`, então funciona no Portainer em modo `Repository`
+- informe `PUBLIC_API_BASE_URL` no Portainer com a URL pública do backend
+- não use `localhost` nessa variável, a menos que o navegador do usuário acesse a própria máquina onde o backend está publicado
+
+Passos no Portainer:
+
+1. crie uma stack apontando para o repositório do frontend
+2. use `docker-compose.yml` como `Compose path`
+3. preencha as variáveis da stack usando como base o arquivo `.env.example`
+4. publique a porta `3011` ou ajuste `FRONTEND_PORT`
+
+Se backend e frontend estiverem em servidores diferentes, `PUBLIC_API_BASE_URL` deve apontar para o endereço real do backend exposto para os usuários.
