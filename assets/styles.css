@@ -1,5 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
     color-scheme: dark;
     --bg-main: #08111f;
@@ -25,6 +29,12 @@ body {
         radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.14), transparent 20%),
         linear-gradient(135deg, #040916 0%, #08111f 48%, #0a172b 100%);
     color: var(--text-main);
+    overflow-x: hidden;
+}
+
+#root {
+    min-height: 100vh;
+    overflow-x: hidden;
 }
 
 .glass {
@@ -269,6 +279,27 @@ input[type="checkbox"] {
     display: none !important;
 }
 
+.sidebar-shell {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    width: min(88vw, 320px);
+    height: 100vh;
+    overflow-x: visible;
+    overflow-y: auto;
+    transition: transform 0.22s ease, width 0.22s ease, padding 0.22s ease;
+}
+
+.app-shell {
+    overflow-x: clip;
+}
+
+.app-main {
+    min-width: 0;
+    max-width: 100%;
+}
+
 .fade-in {
     animation: fadeIn 0.3s ease;
 }
@@ -338,17 +369,18 @@ input[type="checkbox"] {
 [data-tooltip]::after,
 [data-tooltip]::before {
     position: absolute;
-    left: 50%;
+    left: calc(100% + 0.75rem);
+    top: 50%;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.16s ease, transform 0.16s ease;
-    z-index: 30;
+    z-index: 140;
 }
 
 [data-tooltip]::after {
     content: attr(data-tooltip);
-    bottom: calc(100% + 0.65rem);
-    transform: translate(-50%, 0.35rem);
+    bottom: auto;
+    transform: translate(0, -50%);
     padding: 0.42rem 0.58rem;
     border-radius: 0.55rem;
     background: rgba(2, 6, 23, 0.96);
@@ -361,10 +393,10 @@ input[type="checkbox"] {
 
 [data-tooltip]::before {
     content: '';
-    bottom: calc(100% + 0.3rem);
+    bottom: auto;
     width: 0.55rem;
     height: 0.55rem;
-    transform: translate(-50%, 0.35rem) rotate(45deg);
+    transform: translate(-0.32rem, -50%) rotate(45deg);
     background: rgba(2, 6, 23, 0.96);
     border-right: 1px solid rgba(71, 85, 105, 0.7);
     border-bottom: 1px solid rgba(71, 85, 105, 0.7);
@@ -375,7 +407,12 @@ input[type="checkbox"] {
 [data-tooltip]:focus-visible::after,
 [data-tooltip]:focus-visible::before {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translate(0, -50%);
+}
+
+[data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::before {
+    transform: translate(-0.32rem, -50%) rotate(45deg);
 }
 
 .sidebar-nav-button {
@@ -406,6 +443,7 @@ input[type="checkbox"] {
 
 .chart-card {
     min-height: 19rem;
+    overflow: hidden;
 }
 
 .chart-canvas {
@@ -428,7 +466,7 @@ input[type="checkbox"] {
 }
 
 .compact-title {
-    font-size: 2rem;
+    font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2rem);
     line-height: 1.05;
 }
 
@@ -446,6 +484,10 @@ input[type="checkbox"] {
     max-width: 42rem;
     line-height: 1.55;
     font-size: 0.95rem;
+}
+
+.mobile-topbar {
+    backdrop-filter: blur(20px);
 }
 
 .user-menu-shell {
@@ -630,6 +672,13 @@ input[type="checkbox"] {
 }
 
 @media (min-width: 1025px) {
+    .sidebar-shell {
+        position: sticky;
+        width: auto;
+        height: 100vh;
+        overflow: visible;
+    }
+
     .toolbar-controls {
         grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(220px, 1fr) 3rem minmax(180px, 1fr);
     }
@@ -643,11 +692,19 @@ input[type="checkbox"] {
     .toolbar-controls {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
+
+    .sidebar-shell {
+        overflow-x: hidden;
+    }
 }
 
 @media (max-width: 768px) {
     .confirm-modal__footer {
         flex-direction: column;
+    }
+
+    .sidebar-shell {
+        box-shadow: 0 24px 70px rgba(2, 6, 23, 0.45);
     }
 
     .glass {
@@ -674,11 +731,12 @@ input[type="checkbox"] {
 
     .toolbar-controls {
         gap: 0.6rem;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .toolbar-icon-button {
         max-width: none;
+        width: 100%;
     }
 
     .toolbar-button {
@@ -686,6 +744,25 @@ input[type="checkbox"] {
         padding: 0.62rem 0.72rem;
         font-size: 0.82rem;
         border-radius: 0.72rem;
+    }
+
+    .summary-card {
+        padding: 1rem;
+    }
+
+    .summary-copy {
+        font-size: 0.9rem;
+        line-height: 1.45;
+    }
+
+    .chart-card {
+        min-height: 16rem;
+    }
+
+    .chart-canvas--bar,
+    .chart-canvas--pie {
+        height: 15rem !important;
+        max-height: 15rem;
     }
 
     .metric-card {
@@ -717,6 +794,57 @@ input[type="checkbox"] {
         padding: 0.8rem 0.9rem;
     }
 
+
+@media (max-width: 480px) {
+    .sidebar-shell {
+        width: min(90vw, 286px);
+    }
+
+    .mobile-topbar {
+        top: 0.75rem;
+    }
+
+    .summary-card {
+        padding: 0.95rem;
+    }
+
+    .summary-copy {
+        font-size: 0.84rem;
+        line-height: 1.4;
+    }
+
+    .metric-card {
+        padding: 0.85rem;
+    }
+
+    .metric-value {
+        font-size: 1.28rem;
+    }
+
+    .metric-caption {
+        font-size: 0.74rem;
+    }
+
+    .chart-card {
+        min-height: 14rem;
+    }
+
+    .chart-canvas--bar {
+        height: 12.25rem !important;
+        max-height: 12.25rem;
+    }
+
+    .chart-canvas--pie {
+        height: 11.75rem !important;
+        max-height: 11.75rem;
+    }
+
+    .status-pill {
+        min-width: 0;
+        padding: 0.42rem 0.62rem;
+        font-size: 0.64rem;
+    }
+}
     .summary-card {
         padding: 1rem 1rem;
     }

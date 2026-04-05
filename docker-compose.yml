@@ -3,7 +3,7 @@ services:
     build:
       context: .
     environment:
-      API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://host.docker.internal:8011}
+      API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8011}
     ports:
       - "${FRONTEND_PORT:-3011}:80"
     restart: unless-stopped
