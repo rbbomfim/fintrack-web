@@ -32,6 +32,8 @@ const TRANSACTION_FILTER_OPTIONS = [
   { value: 'FIXO', label: 'Custo fixo' },
   { value: 'VARIAVEL', label: 'Custo variável' },
   { value: 'INVESTIMENTO', label: 'Investimento' },
+  { value: 'CARD_ONLY', label: 'Somente cartão' },
+  { value: 'FIXED_CARD', label: 'Fixos no cartão' },
   { value: 'LINKED_INVESTMENTS', label: 'Investimentos vinculados a metas' },
 ];
 const TYPE_LABELS = {
@@ -40,11 +42,20 @@ const TYPE_LABELS = {
   VARIAVEL: 'Custo variável',
   INVESTIMENTO: 'Investimento',
 };
+const PAYMENT_METHOD_OPTIONS = [
+  { value: 'CONTA', label: 'Conta / caixa' },
+  { value: 'CARTAO_CREDITO', label: 'Cartão de crédito' },
+];
+const PAYMENT_METHOD_LABELS = {
+  CONTA: 'Conta / caixa',
+  CARTAO_CREDITO: 'Cartão de crédito',
+};
 const ADMIN_VIEWS = ['ADMIN_USERS', 'ADMIN_CATEGORIES'];
 const CHART_COLORS = ['#38bdf8', '#34d399', '#f97316', '#facc15', '#fb7185', '#a78bfa', '#94a3b8'];
 const EXPENSE_RED_SCALE = ['#7f1d1d', '#991b1b', '#b91c1c', '#dc2626', '#ef4444', '#f87171'];
 const SIDEBAR_STORAGE_KEY = 'fintrack_sidebar_collapsed';
 const DEFAULT_INVESTMENT_FLOOR_PERCENT = 20;
+const CARD_RESIDUAL_CATEGORY = 'Outros do cartão';
 const VIEW_META = {
   Dashboard: { label: 'Dashboard', icon: LayoutDashboard },
   GOALS: { label: 'Metas', icon: Target },
@@ -214,6 +225,9 @@ function defaultTransactionForm(month) {
     amount: '',
     type: 'ENTRADA',
     category: '',
+    paymentMethod: 'CONTA',
+    cardName: '',
+    isCardStatement: false,
     isPaid: false,
     isRecurring: true,
     applyToPlan: false,
@@ -250,6 +264,7 @@ function emptyCategoryAnalytics() {
     months: [],
     categories: [],
     total_cost: '0.00',
+    total_card_cost: '0.00',
   };
 }
 
@@ -278,20 +293,25 @@ function buildExpenseCategorySummaryFromTransactions(transactions, topLimit = 5)
     .filter((item) => item.type === 'FIXO' || item.type === 'VARIAVEL')
     .reduce((accumulator, item) => {
       const next = new Map(accumulator);
-      next.set(item.category, (next.get(item.category) || 0) + Number(item.amount || 0));
+      const current = next.get(item.category) || { value: 0, cardValue: 0 };
+      next.set(item.category, {
+        value: current.value + Number(item.amount || 0),
+        cardValue: current.cardValue + (item.payment_method === 'CARTAO_CREDITO' ? Number(item.amount || 0) : 0),
+      });
       return next;
     }, new Map());
 
   const entries = Array.from(ranking.entries())
-    .map(([label, value]) => ({ label, value }))
+    .map(([label, value]) => ({ label, value: value.value, cardValue: value.cardValue }))
     .filter((item) => item.value > 0)
     .sort((left, right) => right.value - left.value);
 
   const topEntries = entries.slice(0, topLimit);
   const otherTotal = entries.slice(topLimit).reduce((sum, item) => sum + item.value, 0);
+  const otherCardTotal = entries.slice(topLimit).reduce((sum, item) => sum + item.cardValue, 0);
 
   if (otherTotal > 0) {
-    topEntries.push({ label: 'Outras', value: otherTotal });
+    topEntries.push({ label: 'Outras', value: otherTotal, cardValue: otherCardTotal });
   }
 
   return topEntries;
@@ -685,6 +705,12 @@ function ChartsSection({ hidden, income, totalExpenses, paidExpenses, investment
               label(context) {
                 const value = Number(context.raw || 0);
                 const percentage = compositionTotal > 0 ? (value / compositionTotal) * 100 : 0;
+                const source = compositionEntries[context.dataIndex];
+                const cardValue = Number(source?.cardValue || 0);
+                const cardPercent = value > 0 ? (cardValue / value) * 100 : 0;
+                if (cardValue > 0) {
+                  return `${context.label}: ${formatCurrency(value)} (${percentage.toFixed(1)}%) | No cartão: ${formatCurrency(cardValue)} (${cardPercent.toFixed(1)}%)`;
+                }
                 return `${context.label}: ${formatCurrency(value)} (${percentage.toFixed(1)}%)`;
               },
             },
@@ -1195,6 +1221,9 @@ export default function App() {
       amount: formatCurrency(item.amount),
       type: item.type,
       category: item.category,
+      paymentMethod: item.payment_method || 'CONTA',
+      cardName: item.card_name || '',
+      isCardStatement: Boolean(item.is_card_statement),
       isPaid: item.is_paid,
       isRecurring: item.type === 'FIXO' || item.type === 'ENTRADA',
       applyToPlan: false,
@@ -1214,6 +1243,9 @@ export default function App() {
         amount: normalizeCurrencyInput(transactionForm.amount),
         type: transactionForm.type,
         category: transactionForm.category,
+        payment_method: transactionForm.paymentMethod,
+        card_name: transactionForm.paymentMethod === 'CARTAO_CREDITO' ? (transactionForm.cardName.trim() || null) : null,
+        is_card_statement: Boolean(transactionForm.isCardStatement),
         goal_id: transactionForm.type === 'INVESTIMENTO' ? (transactionForm.goalId || null) : null,
         is_paid: transactionForm.isPaid,
       };
@@ -1479,6 +1511,10 @@ export default function App() {
   const filteredTransactions = useMemo(() => {
     const baseItems = typeFilter === 'ALL'
       ? transactions
+      : typeFilter === 'CARD_ONLY'
+        ? transactions.filter((item) => item.payment_method === 'CARTAO_CREDITO')
+        : typeFilter === 'FIXED_CARD'
+          ? transactions.filter((item) => item.type === 'FIXO' && item.payment_method === 'CARTAO_CREDITO')
       : typeFilter === 'LINKED_INVESTMENTS'
         ? transactions.filter((item) => item.type === 'INVESTIMENTO' && item.goal_id)
         : transactions.filter((item) => item.type === typeFilter);
@@ -1492,11 +1528,19 @@ export default function App() {
     [goals],
   );
 
+  const cardPlanningSummary = useMemo(() => buildCardPlanningSummary(transactions), [transactions]);
+  const adjustedExpenseItems = cardPlanningSummary.adjustedExpenses;
+  const statementSummaries = cardPlanningSummary.statementSummaries;
   const income = transactions.filter((item) => item.type === 'ENTRADA').reduce((sum, item) => sum + Number(item.amount), 0);
-  const totalExpenses = transactions.filter((item) => item.type === 'FIXO' || item.type === 'VARIAVEL').reduce((sum, item) => sum + Number(item.amount), 0);
-  const paidExpenses = transactions.filter((item) => item.is_paid && (item.type === 'FIXO' || item.type === 'VARIAVEL')).reduce((sum, item) => sum + Number(item.amount), 0);
+  const totalExpenses = cardPlanningSummary.totalExpenses;
+  const paidExpenses = cardPlanningSummary.paidExpenses;
   const pendingExpenses = Math.max(totalExpenses - paidExpenses, 0);
   const investments = transactions.filter((item) => item.type === 'INVESTIMENTO').reduce((sum, item) => sum + Number(item.amount), 0);
+  const creditCardExpenses = transactions.filter((item) => (item.type === 'FIXO' || item.type === 'VARIAVEL') && item.payment_method === 'CARTAO_CREDITO');
+  const creditCardExpensesTotal = cardPlanningSummary.creditCardCommittedTotal;
+  const fixedCardExpenses = creditCardExpenses.filter((item) => item.type === 'FIXO');
+  const fixedCardExpensesTotal = fixedCardExpenses.reduce((sum, item) => sum + Number(item.amount), 0);
+  const highValueFixedCardExpenses = fixedCardExpenses.filter((item) => Number(item.amount) >= 500);
   const investmentFloorPercent = Number(financialPreferences.investment_floor_percent || user?.investment_floor_percent || DEFAULT_INVESTMENT_FLOOR_PERCENT);
   const minimumInvestmentTarget = income * (investmentFloorPercent / 100);
   const availableToInvest = income - totalExpenses;
@@ -1507,6 +1551,7 @@ export default function App() {
   const projectedBalance = income - totalExpenses - investments;
   const projectedBalancePercent = income > 0 ? (projectedBalance / income) * 100 : 0;
   const futureStatementItems = futureItems.filter((item) => item.type === 'VARIAVEL');
+  const futureFixedCardItems = futureItems.filter((item) => item.type === 'FIXO' && item.payment_method === 'CARTAO_CREDITO');
   const activeGoals = goals.filter((item) => item.is_active);
   const currentViewMeta = VIEW_META[currentView] || VIEW_META.Dashboard;
   const primaryNavItems = [
@@ -1667,12 +1712,14 @@ export default function App() {
                     <article className="metric-card card rounded-[1.7rem] border-b-2 border-rose-400/70"><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Pagamentos</div><div className="metric-value font-extrabold text-rose-300">- {formatCurrency(paidExpenses)}</div><div className="metric-caption">Contas já liquidadas nesta competência.</div></article>
                     <article className="metric-card card rounded-[1.7rem] border-b-2 border-amber-300/70"><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Saídas previstas</div><div className="metric-value font-extrabold text-amber-200">- {formatCurrency(pendingExpenses)}</div><div className="metric-caption">Compromissos ainda abertos dentro do mês.</div></article>
                     <article className="metric-card card rounded-[1.7rem] border-b-2 border-cyan-400/70"><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Investimentos</div><div className="metric-value font-extrabold text-cyan-300">{formatCurrency(investments)}</div><div className="metric-caption">{goalLinkedInvestments.length ? `${formatCurrency(goalLinkedInvestmentsTotal)} vinculados a metas.` : 'Sem aporte vinculado a metas nesta competência.'}</div></article>
+                    <article className="metric-card card rounded-[1.7rem] border-b-2 border-sky-400/70"><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">No cartão</div><div className="metric-value font-extrabold text-sky-300">{formatCurrency(creditCardExpensesTotal)}</div><div className="metric-caption">{creditCardExpenses.length ? `${creditCardExpenses.length} lançamento(s) desta competência foram lançados no cartão.` : 'Nenhum custo desta competência foi marcado no cartão.'}</div></article>
+                    <article className="metric-card card rounded-[1.7rem] border-b-2 border-indigo-300/70"><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Fixos no cartão</div><div className="metric-value font-extrabold text-indigo-200">{formatCurrency(fixedCardExpensesTotal)}</div><div className="metric-caption">{fixedCardExpenses.length ? `${fixedCardExpenses.length} fixo(s) no cartão, sendo ${highValueFixedCardExpenses.length} acima de R$ 500.` : 'Nenhum custo fixo desta competência está marcado no cartão.'}</div></article>
                     <article className={`metric-card card rounded-[1.7rem] border-b-2 ${income <= 0 ? 'border-slate-300/70' : isInvestmentFloorAvailable ? 'border-emerald-300/70' : 'border-amber-300/70'}`}><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Piso p/ investir</div><div className={`metric-value font-extrabold ${income <= 0 ? 'text-slate-50' : isInvestmentFloorAvailable ? 'text-emerald-300' : 'text-amber-200'}`}>{income > 0 ? `${investmentFloorPercent.toFixed(0)}%` : '--'}</div><div className="metric-caption">{income <= 0 ? 'Sem receita para medir o piso.' : isInvestmentFloorAvailable ? `A competência ainda preserva ${formatCurrency(investmentFloorGap)} acima do piso.` : `Faltam ${formatCurrency(Math.abs(investmentFloorGap))} para preservar o piso mensal.`}</div></article>
                     <article className="metric-card card rounded-[1.7rem] border-b-2 border-slate-300/70"><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Saldo projetado</div><div className={`metric-value font-extrabold ${projectedBalance >= 0 ? 'text-slate-50' : 'text-rose-300'}`}>{formatCurrency(projectedBalance)}</div><div className="metric-caption">Receita menos custos previstos e investimentos.</div></article>
                     <article className="metric-card card rounded-[1.7rem] border-b-2 border-emerald-300/70"><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Saldo na receita</div><div className={`metric-value font-extrabold ${projectedBalancePercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{projectedBalancePercent.toFixed(1)}%</div><div className="metric-caption">Percentual da receita que tende a sobrar no fim do mês.</div></article>
                   </section>
 
-                  <ChartsSection hidden={false} income={income} totalExpenses={totalExpenses} paidExpenses={paidExpenses} investments={investments} projection={projection} viewMode={viewMode} transactions={transactions} investmentFloorPercent={investmentFloorPercent} />
+                  <ChartsSection hidden={false} income={income} totalExpenses={totalExpenses} paidExpenses={paidExpenses} investments={investments} projection={projection} viewMode={viewMode} transactions={adjustedExpenseItems} investmentFloorPercent={investmentFloorPercent} />
 
                   <CategoryAreaChart hidden={false} analytics={categoryAnalytics} projection={projection} investmentFloorPercent={investmentFloorPercent} />
 
@@ -1699,6 +1746,29 @@ export default function App() {
 
                   <section className="card rounded-[2rem] overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-800/80 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                      <div><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Conciliação</div><div className="text-xl font-extrabold">Resumo das faturas do cartão</div></div>
+                      <div className="text-sm text-slate-400">Aqui você vê quanto da fatura total já foi detalhado e quanto ainda sobra como residual.</div>
+                    </div>
+                    <div className="overflow-x-auto border-b border-slate-800/80">
+                      <table className="w-full text-left min-w-[980px]">
+                        <thead className="bg-slate-900/60 text-[0.65rem] uppercase tracking-[0.25em] text-slate-500"><tr><th className="px-6 py-4">Competência</th><th className="px-6 py-4">Cartão</th><th className="px-6 py-4 text-right">Fatura total</th><th className="px-6 py-4 text-right">Detalhado</th><th className="px-6 py-4 text-right">Residual</th><th className="px-6 py-4 text-right">Status</th></tr></thead>
+                        <tbody className="divide-y divide-slate-800/80 text-sm">
+                          {!statementSummaries.length ? <tr><td colSpan="6" className="empty-state">Nenhuma fatura total do cartão foi lançada nesta competência.</td></tr> : null}
+                          {statementSummaries.map((item) => (
+                            <tr key={`${item.competence}-${item.cardName}-statement-summary`}>
+                              <td className="px-6 py-4 font-bold text-slate-100">{item.competence}</td>
+                              <td className="px-6 py-4 text-sky-300 font-semibold">{item.cardName}</td>
+                              <td className="px-6 py-4 text-right font-extrabold text-slate-50">{formatCurrency(item.invoiceTotal)}</td>
+                              <td className="px-6 py-4 text-right font-extrabold text-indigo-200">{formatCurrency(item.detailedTotal)}</td>
+                              <td className="px-6 py-4 text-right font-extrabold text-amber-200">{formatCurrency(item.residualTotal)}</td>
+                              <td className={`px-6 py-4 text-right font-extrabold ${item.exceededBy > 0 ? 'text-rose-300' : item.residualTotal > 0 ? 'text-amber-200' : 'text-emerald-300'}`}>{item.exceededBy > 0 ? `Detalhado acima em ${formatCurrency(item.exceededBy)}` : item.residualTotal > 0 ? `Faltam ${formatCurrency(item.residualTotal)}` : 'Fatura totalmente detalhada'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="px-6 py-5 border-b border-slate-800/80 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                       <div><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Investimentos vinculados</div><div className="text-xl font-extrabold">{month}</div></div>
                       <div className="text-sm text-slate-400">Esses lançamentos contam para o card de investimentos e também para o progresso das metas.</div>
                     </div>
@@ -1722,13 +1792,13 @@ export default function App() {
 
                     <div className="px-6 py-5 border-b border-slate-800/80 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                       <div><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Lançamentos</div><div className="text-xl font-extrabold">{month}</div></div>
-                      <div className="text-sm text-slate-400">Saídas são exibidas com sinal negativo.</div>
+                      <div className="text-sm text-slate-400">Saídas são exibidas com sinal negativo e o cartão aparece como origem de pagamento.</div>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left min-w-[1100px]">
-                        <thead className="bg-slate-900/60 text-[0.65rem] uppercase tracking-[0.25em] text-slate-500"><tr><th className="px-6 py-4"><button type="button" className="font-inherit" onClick={() => toggleTransactionSort('due_date')}>{sortLabel('due_date', 'Venc.')}</button></th><th className="px-6 py-4">Descrição</th><th className="px-6 py-4"><button type="button" className="font-inherit" onClick={() => toggleTransactionSort('category')}>{sortLabel('category', 'Categoria')}</button></th><th className="px-6 py-4">Meta</th><th className="px-6 py-4 text-right"><button type="button" className="font-inherit" onClick={() => toggleTransactionSort('amount')}>{sortLabel('amount', 'Valor')}</button></th><th className="px-6 py-4 text-center"><button type="button" className="font-inherit" onClick={() => toggleTransactionSort('status')}>{sortLabel('status', 'Status')}</button></th><th className="px-6 py-4 text-center">Ações</th></tr></thead>
+                        <table className="w-full text-left min-w-[1240px]">
+                          <thead className="bg-slate-900/60 text-[0.65rem] uppercase tracking-[0.25em] text-slate-500"><tr><th className="px-6 py-4"><button type="button" className="font-inherit" onClick={() => toggleTransactionSort('due_date')}>{sortLabel('due_date', 'Venc.')}</button></th><th className="px-6 py-4">Descrição</th><th className="px-6 py-4"><button type="button" className="font-inherit" onClick={() => toggleTransactionSort('category')}>{sortLabel('category', 'Categoria')}</button></th><th className="px-6 py-4">Pagamento</th><th className="px-6 py-4">Meta</th><th className="px-6 py-4 text-right"><button type="button" className="font-inherit" onClick={() => toggleTransactionSort('amount')}>{sortLabel('amount', 'Valor')}</button></th><th className="px-6 py-4 text-center"><button type="button" className="font-inherit" onClick={() => toggleTransactionSort('status')}>{sortLabel('status', 'Status')}</button></th><th className="px-6 py-4 text-center">Ações</th></tr></thead>
                         <tbody className="divide-y divide-slate-800/80 text-sm">
-                          {!filteredTransactions.length ? <tr><td colSpan="7" className="empty-state">Nenhum lançamento encontrado para esse filtro na competência selecionada.</td></tr> : null}
+                            {!filteredTransactions.length ? <tr><td colSpan="8" className="empty-state">Nenhum lançamento encontrado para esse filtro na competência selecionada.</td></tr> : null}
                           {filteredTransactions.map((item) => {
                             const status = getStatusInfo(item);
                             const isExpense = item.type === 'FIXO' || item.type === 'VARIAVEL';
@@ -1736,8 +1806,9 @@ export default function App() {
                             return (
                               <tr key={item.id} className="hover:bg-slate-900/35 transition">
                                 <td className="px-6 py-4 text-slate-400 font-mono">{item.due_date ? item.due_date.slice(-2) : '--'}</td>
-                                <td className="px-6 py-4"><div className="font-bold text-slate-50">{item.description}</div><div className="mt-1 flex flex-wrap items-center gap-2"><span className="text-xs uppercase tracking-[0.2em] text-slate-500">{TYPE_LABELS[item.type]}</span>{linkedGoalName ? <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-cyan-200">Meta vinculada</span> : null}</div></td>
+                                <td className="px-6 py-4"><div className="font-bold text-slate-50">{item.description}</div><div className="mt-1 flex flex-wrap items-center gap-2"><span className="text-xs uppercase tracking-[0.2em] text-slate-500">{TYPE_LABELS[item.type]}</span>{item.is_card_statement ? <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-amber-200">Fatura total</span> : item.payment_method === 'CARTAO_CREDITO' ? <span className="rounded-full border border-sky-400/25 bg-sky-400/10 px-2 py-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-sky-200">Abate fatura</span> : null}{linkedGoalName ? <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-cyan-200">Meta vinculada</span> : null}</div></td>
                                 <td className="px-6 py-4 text-slate-300">{item.category}</td>
+                                  <td className="px-6 py-4 text-slate-300"><div className="font-semibold text-slate-100">{PAYMENT_METHOD_LABELS[item.payment_method] || 'Conta / caixa'}</div>{item.payment_method === 'CARTAO_CREDITO' && item.card_name ? <div className="mt-1 text-xs uppercase tracking-[0.18em] text-sky-300">{item.card_name}</div> : <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-500">Sem cartão</div>}</td>
                                 <td className="px-6 py-4 text-slate-300">{linkedGoalName || '--'}</td>
                                 <td className={`px-6 py-4 text-right font-extrabold ${isExpense ? 'text-rose-300' : 'text-emerald-300'}`}>{isExpense ? '- ' : ''}{formatCurrency(item.amount)}</td>
                                 <td className="px-6 py-4 text-center">
@@ -1747,6 +1818,30 @@ export default function App() {
                               </tr>
                             );
                           })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section className="card rounded-[2rem] overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-800/80 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                      <div><div className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">Cartão de crédito</div><div className="text-xl font-extrabold">Compromissos fixos já previstos no cartão</div></div>
+                      <div className="text-sm text-slate-400">Use este bloco para enxergar o que já nasce comprometido nas próximas faturas.</div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left min-w-[980px]">
+                        <thead className="bg-slate-900/60 text-[0.65rem] uppercase tracking-[0.25em] text-slate-500"><tr><th className="px-6 py-4">Competência</th><th className="px-6 py-4">Cartão</th><th className="px-6 py-4">Descrição</th><th className="px-6 py-4">Categoria</th><th className="px-6 py-4 text-right">Valor</th></tr></thead>
+                        <tbody className="divide-y divide-slate-800/80 text-sm">
+                          {!futureFixedCardItems.length ? <tr><td colSpan="5" className="empty-state">Nenhum compromisso fixo futuro está marcado no cartão.</td></tr> : null}
+                          {futureFixedCardItems.map((item) => (
+                            <tr key={`${item.id}-${item.competence}-fixed-card`}>
+                              <td className="px-6 py-4 font-bold text-slate-100">{formatMonthLabel(item.competence)}</td>
+                              <td className="px-6 py-4 text-sky-300 font-semibold">{item.card_name || 'Cartão principal'}</td>
+                              <td className="px-6 py-4 font-bold text-slate-50">{item.description}</td>
+                              <td className="px-6 py-4 text-slate-300">{item.category}</td>
+                              <td className="px-6 py-4 text-right font-extrabold text-indigo-200">{formatCurrency(item.amount)}</td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
@@ -1928,8 +2023,11 @@ export default function App() {
           <label className="field-stack"><span className="field-label">Competência</span><span className="field-control field-control--icon"><input value={transactionForm.competence} onChange={(event) => setTransactionForm((current) => ({ ...current, competence: event.target.value }))} type="month" required /></span></label>
           <label className="field-stack"><span className="field-label">Vencimento</span><span className="field-control field-control--icon"><input value={transactionForm.dueDate} onChange={(event) => setTransactionForm((current) => ({ ...current, dueDate: event.target.value }))} type="date" /></span></label>
           <label className="field-stack"><span className="field-label">Valor (R$)</span><span className="field-control field-control--currency"><span className="field-prefix">R$</span><input value={transactionForm.amount} onChange={(event) => setTransactionForm((current) => ({ ...current, amount: formatCurrencyInput(event.target.value) }))} type="text" inputMode="decimal" required placeholder="0,00" /></span></label>
-          <label className="field-stack"><span className="field-label">Tipo</span><span className="field-control field-control--select"><select value={transactionForm.type} onChange={(event) => setTransactionForm((current) => ({ ...current, type: event.target.value, isRecurring: event.target.value === 'ENTRADA' || event.target.value === 'FIXO', goalId: event.target.value === 'INVESTIMENTO' ? current.goalId : '' }))}>{TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></span></label>
-          <label className="field-stack"><span className="field-label">Categoria</span><span className="field-control field-control--select"><select value={transactionForm.category} onChange={(event) => setTransactionForm((current) => ({ ...current, category: event.target.value }))}>{categories.filter((item) => item.type === transactionForm.type).map((item) => <option key={`${item.type}-${item.name}`} value={item.name}>{item.name}</option>)}</select></span></label>
+          <label className="field-stack"><span className="field-label">Tipo</span><span className="field-control field-control--select"><select value={transactionForm.type} onChange={(event) => setTransactionForm((current) => ({ ...current, type: event.target.value, isRecurring: event.target.value === 'ENTRADA' || event.target.value === 'FIXO', goalId: event.target.value === 'INVESTIMENTO' ? current.goalId : '', isCardStatement: current.isCardStatement && (event.target.value === 'FIXO' || event.target.value === 'VARIAVEL') }))}>{TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></span></label>
+          <label className="field-stack"><span className="field-label">Categoria</span><span className="field-control field-control--select"><select value={transactionForm.category} onChange={(event) => setTransactionForm((current) => ({ ...current, category: event.target.value }))} disabled={transactionForm.isCardStatement}>{categories.filter((item) => item.type === transactionForm.type).map((item) => <option key={`${item.type}-${item.name}`} value={item.name}>{item.name}</option>)}</select></span></label>
+          <label className="field-stack"><span className="field-label">Origem do pagamento</span><span className="field-control field-control--select"><select value={transactionForm.paymentMethod} onChange={(event) => setTransactionForm((current) => ({ ...current, paymentMethod: event.target.value, cardName: event.target.value === 'CARTAO_CREDITO' ? current.cardName : '' }))}>{PAYMENT_METHOD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></span></label>
+          <label className="field-stack"><span className="field-label">Cartão (opcional)</span><span className="field-control"><input value={transactionForm.cardName} onChange={(event) => setTransactionForm((current) => ({ ...current, cardName: event.target.value }))} type="text" placeholder={transactionForm.paymentMethod === 'CARTAO_CREDITO' ? 'Ex: Visa principal' : 'Preencha apenas se for cartão'} disabled={transactionForm.paymentMethod !== 'CARTAO_CREDITO'} /></span></label>
+          {transactionForm.paymentMethod === 'CARTAO_CREDITO' && (transactionForm.type === 'FIXO' || transactionForm.type === 'VARIAVEL') ? <label className="flex items-center gap-3 pt-3 md:col-span-2"><input checked={transactionForm.isCardStatement} onChange={(event) => setTransactionForm((current) => ({ ...current, isCardStatement: event.target.checked, type: event.target.checked ? 'VARIAVEL' : current.type, category: event.target.checked ? ((categories.find((item) => item.type === 'VARIAVEL' && item.name === 'Cartao de Credito')?.name) || current.category) : current.category, isRecurring: event.target.checked ? false : current.isRecurring }))} type="checkbox" className="h-4 w-4 rounded border-slate-600 bg-slate-900" />Lançar como fatura total do cartão. Os lançamentos detalhados deste mesmo cartão serão abatidos do residual.</label> : null}
           {transactionForm.type === 'INVESTIMENTO' ? <label className="field-stack md:col-span-2"><span className="field-label">Meta vinculada (opcional)</span><span className="field-control field-control--select"><select value={transactionForm.goalId} onChange={(event) => setTransactionForm((current) => ({ ...current, goalId: event.target.value }))}><option value="">Não vincular a meta</option>{activeGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></span></label> : null}
           {!transactionForm.id ? <label className="flex items-center gap-3 pt-3 md:col-span-2"><input checked={transactionForm.isRecurring} onChange={(event) => setTransactionForm((current) => ({ ...current, isRecurring: event.target.checked }))} type="checkbox" className="h-4 w-4 rounded border-slate-600 bg-slate-900" />Repetir mensalmente a partir desta data</label> : null}
           {transactionForm.id && transactionForm.planId ? (
@@ -2282,4 +2380,81 @@ function GoalProgressChart({ goal }) {
   if (!goal.chart.length) return null;
 
   return <canvas ref={chartRef} className="chart-canvas chart-canvas--bar" />;
+}
+
+
+function buildCardPlanningSummary(transactions) {
+  const expenseItems = transactions.filter((item) => item.type === 'FIXO' || item.type === 'VARIAVEL');
+  const regularExpenses = expenseItems.filter((item) => !item.is_card_statement);
+  const statementItems = expenseItems.filter((item) => item.payment_method === 'CARTAO_CREDITO' && item.is_card_statement);
+  const cardDetailedByKey = regularExpenses.reduce((accumulator, item) => {
+    if (item.payment_method !== 'CARTAO_CREDITO') return accumulator;
+    const key = `${item.competence}::${item.card_name || 'Cartão principal'}`;
+    accumulator.set(key, (accumulator.get(key) || 0) + Number(item.amount || 0));
+    return accumulator;
+  }, new Map());
+
+  const statementGroups = statementItems.reduce((accumulator, item) => {
+    const key = `${item.competence}::${item.card_name || 'Cartão principal'}`;
+    const current = accumulator.get(key) || {
+      competence: item.competence,
+      cardName: item.card_name || 'Cartão principal',
+      invoiceTotal: 0,
+      isPaid: false,
+      type: item.type,
+    };
+    current.invoiceTotal += Number(item.amount || 0);
+    current.isPaid = current.isPaid || Boolean(item.is_paid);
+    current.type = item.type;
+    accumulator.set(key, current);
+    return accumulator;
+  }, new Map());
+
+  const adjustedExpenses = [...regularExpenses];
+  const statementSummaries = Array.from(statementGroups.entries()).map(([key, statement]) => {
+    const detailedTotal = cardDetailedByKey.get(key) || 0;
+    const residualTotal = Math.max(statement.invoiceTotal - detailedTotal, 0);
+    const exceededBy = Math.max(detailedTotal - statement.invoiceTotal, 0);
+
+    if (residualTotal > 0) {
+      adjustedExpenses.push({
+        id: `card-residual-${key}`,
+        description: `Outros lançamentos do ${statement.cardName}`,
+        amount: residualTotal,
+        type: statement.type,
+        category: CARD_RESIDUAL_CATEGORY,
+        payment_method: 'CARTAO_CREDITO',
+        card_name: statement.cardName,
+        is_paid: statement.isPaid,
+        is_card_statement: false,
+        competence: statement.competence,
+      });
+    }
+
+    return {
+      ...statement,
+      detailedTotal,
+      residualTotal,
+      exceededBy,
+    };
+  }).sort((left, right) => left.cardName.localeCompare(right.cardName));
+
+  const nonCardPaid = regularExpenses
+    .filter((item) => item.payment_method !== 'CARTAO_CREDITO' && item.is_paid)
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const cardPaidWithoutInvoice = regularExpenses
+    .filter((item) => item.payment_method === 'CARTAO_CREDITO' && !statementGroups.has(`${item.competence}::${item.card_name || 'Cartão principal'}`) && item.is_paid)
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const cardPaidWithInvoice = statementSummaries.reduce((sum, item) => sum + (item.isPaid ? item.invoiceTotal : 0), 0);
+
+  return {
+    adjustedExpenses,
+    statementSummaries,
+    totalExpenses: adjustedExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+    paidExpenses: nonCardPaid + cardPaidWithoutInvoice + cardPaidWithInvoice,
+    creditCardCommittedTotal: statementSummaries.reduce((sum, item) => sum + item.invoiceTotal, 0)
+      + regularExpenses
+        .filter((item) => item.payment_method === 'CARTAO_CREDITO' && !statementGroups.has(`${item.competence}::${item.card_name || 'Cartão principal'}`))
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0),
+  };
 }
