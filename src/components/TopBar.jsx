@@ -4,7 +4,7 @@ import { formatCompetence } from '../helpers.js';
 
 export default function TopBar({ title, competence, onCompetenceChange, onNewLancamento, onBell }) {
   return (
-    <header className="flex flex-col gap-4 border-b border-slate-800 bg-slate-950/30 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+    <header data-testid="topbar" className="flex flex-col gap-4 border-b border-slate-800 bg-slate-950/30 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
       <div>
         <div className="text-[0.65rem] font-black uppercase tracking-[0.25em] text-slate-500">{title}</div>
         <div className="text-xl font-extrabold capitalize text-slate-50">{formatCompetence(competence)}</div>

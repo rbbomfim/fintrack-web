@@ -30,7 +30,21 @@ export async function requestApi(method, path, body) {
     payload = JSON.stringify(body);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { method, headers, body: payload });
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { method, headers, body: payload });
+  } catch (cause) {
+    // fetch só lança em falha de rede/CORS: a resposta nem chegou ao JS.
+    // "Failed to fetch" sozinho não ajuda ninguém a resolver, então explicamos.
+    const error = new Error(
+      `Não foi possível falar com a API em ${API_BASE_URL}. ` +
+        'Verifique se o backend está no ar e se alguma extensão do navegador ' +
+        'ou proxy não está bloqueando a requisição (teste em uma janela anônima).',
+    );
+    error.cause = cause;
+    error.isNetworkError = true;
+    throw error;
+  }
 
   if (response.status === 401 && unauthorizedHandler) {
     unauthorizedHandler();

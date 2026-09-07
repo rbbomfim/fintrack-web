@@ -6,6 +6,9 @@ export default function ModalShell({ open, onClose, title, eyebrow, children, ma
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={onClose} />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title || eyebrow || 'Janela'}
         className={`relative w-full ${maxWidth} rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl`}
       >
         <div className="mb-5 flex items-start justify-between gap-4">

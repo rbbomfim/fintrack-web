@@ -3,7 +3,13 @@ services:
     build:
       context: .
     environment:
-      API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8011}
+      # Same-origin (recomendado): o nginx repassa /api para o backend, então o
+      # navegador nunca faz cross-origin. API_PROXY_TARGET é o endereço do backend
+      # visto de DENTRO deste container (ex.: http://192.168.3.12:8011).
+      API_PROXY_TARGET: ${API_PROXY_TARGET:-}
+      # Modo direto (legado): deixe API_PROXY_TARGET vazio e aponte a URL pública
+      # do backend aqui. Nesse caso BACKEND_CORS_ORIGINS precisa listar o frontend.
+      API_BASE_URL: ${PUBLIC_API_BASE_URL:-/api}
     ports:
       - "${FRONTEND_PORT:-3011}:80"
     restart: unless-stopped

@@ -20,6 +20,7 @@ RUN apk add --no-cache gettext
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY env.template.js /usr/share/nginx/html/env.template.js
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx-proxy.template /etc/nginx/nginx-proxy.template
 COPY docker-entrypoint.sh /docker-entrypoint-fintrack.sh
 
 RUN chmod +x /docker-entrypoint-fintrack.sh

@@ -13,6 +13,18 @@ const EXPENSE_TYPES = ['FIXO', 'VARIAVEL'];
 const RECURRENCE_LABELS = { MENSAL: 'Mensal', UNICO: 'Única' };
 const dueDay = (entry) => (entry.due_date ? `dia ${Number(entry.due_date.slice(8, 10))}` : '--');
 
+// O backend recusa exclusão em dois casos legítimos. Traduzimos os dois: a mensagem
+// crua da API vem em inglês e não diz ao usuário o que fazer em seguida.
+function deleteErrorMessage(err) {
+  if (err.status === 409) {
+    return "Não é possível excluir: já existe baixa registrada. Use 'Encerrar' para desativar a partir de uma competência.";
+  }
+  if (err.status === 400) {
+    return "Lançamento recorrente não pode ser excluído. Use 'Encerrar recorrência' para interromper a partir de uma competência.";
+  }
+  return err.message;
+}
+
 export default function LancamentosView({ competence, onToast, reloadKey }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -58,13 +70,7 @@ export default function LancamentosView({ competence, onToast, reloadKey }) {
       await load();
     } catch (err) {
       setDeleteEntry(null);
-      if (onToast) {
-        onToast(
-          err.status === 409
-            ? "Não é possível excluir: existe histórico de pagamentos. Use 'Encerrar' para desativar a partir de uma competência."
-            : err.message,
-        );
-      }
+      if (onToast) onToast(deleteErrorMessage(err));
     } finally {
       setDeleteBusy(false);
     }
